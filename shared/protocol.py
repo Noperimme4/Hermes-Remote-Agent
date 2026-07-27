@@ -33,6 +33,17 @@ class MessageType(Enum):
     FILE_DOWNLOAD = "file_download"
     FILE_LIST = "file_list"
     
+    # Remote File Access (Virtual FS)
+    REMOTE_FILE_OPEN = "remote_file_open"
+    REMOTE_FILE_READ = "remote_file_read"
+    REMOTE_FILE_WRITE = "remote_file_write"
+    REMOTE_FILE_SEEK = "remote_file_seek"
+    REMOTE_FILE_CLOSE = "remote_file_close"
+    REMOTE_FILE_STAT = "remote_file_stat"
+    REMOTE_FILE_LIST = "remote_file_list"
+    REMOTE_FILE_CHUNK = "remote_file_chunk"
+    REMOTE_FILE_ERROR = "remote_file_error"
+    
     # Process management
     PROCESS_LIST = "process_list"
     PROCESS_KILL = "process_kill"
@@ -202,6 +213,151 @@ class FileInfo(BaseMessage):
         self.type = MessageType.FILE_LIST
 
 
+# ─── Remote File Access (Virtual FS over Agent Channel) ──────────
+
+@dataclass(kw_only=True)
+class RemoteFileOpenRequest(BaseMessage):
+    """Open a remote file on the client side."""
+    path: str
+    mode: str = "rb"  # rb, r, wb, w
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_OPEN
+
+
+@dataclass(kw_only=True)
+class RemoteFileOpenResponse(BaseMessage):
+    """Response to remote file open request."""
+    request_id: str
+    handle: Optional[str] = None
+    success: bool = True
+    error: str = ""
+    size: int = 0
+    is_dir: bool = False
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_OPEN
+
+
+@dataclass(kw_only=True)
+class RemoteFileReadRequest(BaseMessage):
+    """Read chunk from remote file."""
+    handle: str
+    offset: int
+    length: int
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_READ
+
+
+@dataclass(kw_only=True)
+class RemoteFileWriteRequest(BaseMessage):
+    """Write chunk to remote file."""
+    handle: str
+    offset: int
+    data: str  # base64 encoded
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_WRITE
+
+
+@dataclass(kw_only=True)
+class RemoteFileSeekRequest(BaseMessage):
+    """Seek in remote file."""
+    handle: str
+    offset: int
+    whence: int = 0  # 0=absolute, 1=relative, 2=from end
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_SEEK
+
+
+@dataclass(kw_only=True)
+class RemoteFileCloseRequest(BaseMessage):
+    """Close remote file handle."""
+    handle: str
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_CLOSE
+
+
+@dataclass(kw_only=True)
+class RemoteFileStatRequest(BaseMessage):
+    """Stat remote file (get metadata without opening)."""
+    path: str
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_STAT
+
+
+@dataclass(kw_only=True)
+class RemoteFileStatResponse(BaseMessage):
+    """Response to remote file stat."""
+    request_id: str
+    success: bool = True
+    error: str = ""
+    size: int = 0
+    is_dir: bool = False
+    modified: str = ""
+    permissions: str = ""
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_STAT
+
+
+@dataclass(kw_only=True)
+class RemoteFileListRequest(BaseMessage):
+    """List remote directory."""
+    path: str = "."
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_LIST
+
+
+@dataclass(kw_only=True)
+class RemoteFileListResponse(BaseMessage):
+    """Response to remote directory list."""
+    request_id: str
+    entries: List[FileInfo] = field(default_factory=list)
+    success: bool = True
+    error: str = ""
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_LIST
+
+
+@dataclass(kw_only=True)
+class RemoteFileChunk(BaseMessage):
+    """File data chunk (base64 encoded)."""
+    handle: str
+    offset: int
+    data: str  # base64 encoded
+    eof: bool = False
+    request_id: str = ""
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_CHUNK
+
+
+@dataclass(kw_only=True)
+class RemoteFileError(BaseMessage):
+    """Error in remote file operation."""
+    handle: str = ""
+    request_id: str
+    code: str
+    message: str
+    
+    def __post_init__(self):
+        self.type = MessageType.REMOTE_FILE_ERROR
+
+
 # ─── PTY Shell Operations ────────────────────────────────────────
 
 
@@ -277,6 +433,16 @@ _TYPE_MAP = {
     MessageType.SHELL_DATA: ShellData,
     MessageType.SHELL_RESIZE: ShellResize,
     MessageType.SHELL_EXIT: ShellExit,
+    # Remote File Access
+    MessageType.REMOTE_FILE_OPEN: RemoteFileOpenRequest,
+    MessageType.REMOTE_FILE_READ: RemoteFileReadRequest,
+    MessageType.REMOTE_FILE_WRITE: RemoteFileWriteRequest,
+    MessageType.REMOTE_FILE_SEEK: RemoteFileSeekRequest,
+    MessageType.REMOTE_FILE_CLOSE: RemoteFileCloseRequest,
+    MessageType.REMOTE_FILE_STAT: RemoteFileStatRequest,
+    MessageType.REMOTE_FILE_LIST: RemoteFileListRequest,
+    MessageType.REMOTE_FILE_CHUNK: RemoteFileChunk,
+    MessageType.REMOTE_FILE_ERROR: RemoteFileError,
 }
 
 

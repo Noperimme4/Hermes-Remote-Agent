@@ -20,8 +20,17 @@ from protocol import (
     AuthRequest, AuthResponse, CommandRequest, CommandResponse,
     CommandStream, Heartbeat, ErrorMessage, FileListRequest, FileInfo,
     ShellStartRequest, ShellStartResponse, ShellData, ShellResize, ShellExit,
-    parse_message, create_command_request, create_auth_request
+    # Remote File Access
+    RemoteFileOpenRequest, RemoteFileOpenResponse,
+    RemoteFileReadRequest, RemoteFileWriteRequest,
+    RemoteFileSeekRequest, RemoteFileCloseRequest,
+    RemoteFileStatRequest, RemoteFileStatResponse,
+    RemoteFileListRequest, RemoteFileListResponse,
+    RemoteFileChunk, RemoteFileError,
+    parse_message, create_command_request, create_auth_request,
 )
+
+from .remote_files import RemoteFileProvider
 
 
 @dataclass
@@ -64,6 +73,9 @@ class RemoteAgentClient:
         self.stream_handlers: Dict[str, List[Callable]] = {}
         self.shells: Dict[str, Any] = {}
         
+        # Remote File Access Provider
+        self.remote_file_provider = RemoteFileProvider(self._send_message)
+        
         # Setup logging
         import logging
         level = getattr(logging, config.log_level.upper(), logging.WARNING)
@@ -99,32 +111,16 @@ class RemoteAgentClient:
                 client_name=self.config.client_name,
                 client_version=self.config.client_version
             )
-            await self._send_message(auth)
             
-            # Wait for auth response
-            response = await self._wait_for_response(auth.request_id, timeout=10)
-            
-            if not response or not isinstance(response, AuthResponse) or not response.success:
-                error_msg = response.message if response else "No response"
-                self.logger.error(f"Authentication failed: {error_msg}")
-                return False
-            
-            self.session_id = response.session_id
-            self.server_info = {
-                "name": response.server_name,
-                "version": response.server_version,
-                "allowed_commands": response.allowed_commands
-            }
-            
-            self.logger.info(f"Authenticated! Session: {self.session_id}")
-            self.logger.info(f"Server: {response.server_name} v{response.server_version}")
-            
-            # Start background tasks
+            # Start reader loop BEFORE sending auth request
             self.running = True
             asyncio.create_task(self._reader_loop())
             asyncio.create_task(self._heartbeat_loop())
             
-            return True
+            await self._send_message(auth)
+            
+            # Wait for auth response
+            response = await self._wait_for_response(auth.request_id, timeout=10)
             
         except asyncio.TimeoutError:
             self.logger.error("Connection timeout")
@@ -175,7 +171,21 @@ class RemoteAgentClient:
     
     async def _handle_message(self, message: BaseMessage):
         """Route incoming message."""
-        if message.type == MessageType.AUTH_RESPONSE:
+        # Remote File Access messages
+        if message.type in (
+            MessageType.REMOTE_FILE_OPEN,
+            MessageType.REMOTE_FILE_READ,
+            MessageType.REMOTE_FILE_WRITE,
+            MessageType.REMOTE_FILE_SEEK,
+            MessageType.REMOTE_FILE_CLOSE,
+            MessageType.REMOTE_FILE_STAT,
+            MessageType.REMOTE_FILE_LIST,
+            MessageType.REMOTE_FILE_CHUNK,
+            MessageType.REMOTE_FILE_ERROR,
+        ):
+            await self.remote_file_provider.handle_message(message)
+        
+        elif message.type == MessageType.AUTH_RESPONSE:
             # Already handled in connect()
             pass
         

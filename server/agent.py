@@ -29,8 +29,18 @@ from protocol import (
     AuthRequest, AuthResponse, CommandRequest, CommandResponse,
     CommandStream, Heartbeat, ErrorMessage, FileListRequest, FileInfo,
     ShellStartRequest, ShellStartResponse, ShellData, ShellResize, ShellExit,
-    parse_message
+    # Remote File Access
+    RemoteFileOpenRequest, RemoteFileOpenResponse,
+    RemoteFileReadRequest, RemoteFileWriteRequest,
+    RemoteFileSeekRequest, RemoteFileCloseRequest,
+    RemoteFileStatRequest, RemoteFileStatResponse,
+    RemoteFileListRequest, RemoteFileListResponse,
+    RemoteFileChunk, RemoteFileError,
+    parse_message,
 )
+
+from .remote_files import RemoteFileServer
+
 
 # ─── Configuration ────────────────────────────────────────────────
 
@@ -208,123 +218,6 @@ class CommandExecutor:
         self.logger.info(f"Executing: {' '.join(cmd)} (cwd={cwd})")
         
         try:
-            # Execute with timeout
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=cwd,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=self.config.max_output_size
-            )
-            
-            # Track active command
-            session.active_commands[request.request_id] = asyncio.current_task()
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=request.timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                return CommandResponse(
-                    request_id=request.request_id,
-                    status=CommandStatus.TIMEOUT,
-                    exit_code=-1,
-                    stderr=f"Command timed out after {request.timeout}s",
-                    execution_time=time.time() - start_time
-                )
-            finally:
-                session.active_commands.pop(request.request_id, None)
-            
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
-            
-            # Truncate if too large
-            if len(stdout_str) > self.config.max_output_size:
-                stdout_str = stdout_str[:self.config.max_output_size] + "\n... [truncated]"
-            if len(stderr_str) > self.config.max_output_size:
-                stderr_str = stderr_str[:self.config.max_output_size] + "\n... [truncated]"
-            
-            status = CommandStatus.COMPLETED if process.returncode == 0 else CommandStatus.FAILED
-            
-            return CommandResponse(
-                request_id=request.request_id,
-                status=status,
-                exit_code=process.returncode,
-                stdout=stdout_str,
-                stderr=stderr_str,
-                execution_time=time.time() - start_time
-            )
-            
-        except FileNotFoundError:
-            return CommandResponse(
-                request_id=request.request_id,
-                status=CommandStatus.FAILED,
-                exit_code=-1,
-                stderr=f"Command not found: {request.command}",
-                execution_time=time.time() - start_time
-            )
-        except PermissionError:
-            return CommandResponse(
-                request_id=request.request_id,
-                status=CommandStatus.FAILED,
-                exit_code=-1,
-                stderr=f"Permission denied: {request.command}",
-                execution_time=time.time() - start_time
-            )
-        except Exception as e:
-            self.logger.exception(f"Execution error: {e}")
-            return CommandResponse(
-                request_id=request.request_id,
-                status=CommandStatus.FAILED,
-                exit_code=-1,
-                stderr=f"Execution error: {str(e)}",
-                execution_time=time.time() - start_time
-            )
-    
-    async def execute_streaming(self, request: CommandRequest, session: ClientSession, 
-                                send_callback) -> CommandResponse:
-        """Execute command with streaming output."""
-        start_time = time.time()
-        
-        if not self.is_command_allowed(request.command, request.args):
-            return CommandResponse(
-                request_id=request.request_id,
-                status=CommandStatus.FAILED,
-                exit_code=-1,
-                stderr=f"Command not allowed: {request.command}",
-                execution_time=time.time() - start_time
-            )
-        
-        env = os.environ.copy()
-        env.update(request.env)
-        
-        cwd = request.working_dir or session.current_dir
-        if not os.path.isabs(cwd):
-            cwd = os.path.join(session.current_dir, cwd)
-        cwd = os.path.normpath(cwd)
-        
-        if not os.path.exists(cwd):
-            return CommandResponse(
-                request_id=request.request_id,
-                status=CommandStatus.FAILED,
-                exit_code=-1,
-                stderr=f"Working directory does not exist: {cwd}",
-                execution_time=time.time() - start_time
-            )
-        
-        if request.shell and self.config.allow_shell:
-            cmd_str = f"{request.command} {' '.join(request.args)}"
-            cmd = ["bash", "-c", cmd_str]
-        else:
-            cmd = [request.command] + request.args
-        
-        self.logger.info(f"Streaming execution: {' '.join(cmd)}")
-        
-        try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=cwd,
@@ -338,47 +231,12 @@ class CommandExecutor:
             
             stdout_chunks = []
             stderr_chunks = []
-            seq = 0
             
-            async def read_stream(stream, chunk_type):
-                nonlocal seq
-                while True:
-                    line = await stream.readline()
-                    if not line:
-                        break
-                    decoded = line.decode('utf-8', errors='replace')
-                    if chunk_type == "stdout":
-                        stdout_chunks.append(decoded)
-                    else:
-                        stderr_chunks.append(decoded)
-                    
-                    # Send chunk
-                    await send_callback(CommandStream(
-                        request_id=request.request_id,
-                        chunk_type=chunk_type,
-                        data=decoded,
-                        sequence=seq
-                    ))
-                    seq += 1
-            
-            # Read both streams concurrently
-            await asyncio.gather(
-                read_stream(process.stdout, "stdout"),
-                read_stream(process.stderr, "stderr"),
-            )
-            
-            # Wait for process with timeout
             try:
                 await asyncio.wait_for(process.wait(), timeout=request.timeout)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                await send_callback(CommandStream(
-                    request_id=request.request_id,
-                    chunk_type="exit",
-                    data=f"\n[Timeout after {request.timeout}s]",
-                    sequence=seq
-                ))
                 return CommandResponse(
                     request_id=request.request_id,
                     status=CommandStatus.TIMEOUT,
@@ -389,26 +247,22 @@ class CommandExecutor:
             finally:
                 session.active_commands.pop(request.request_id, None)
             
-            # Send exit notification
-            await send_callback(CommandStream(
-                request_id=request.request_id,
-                chunk_type="exit",
-                data=f"\n[Exit code: {process.returncode}]",
-                sequence=seq
-            ))
+            stdout, stderr = await process.communicate()
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
             
             status = CommandStatus.COMPLETED if process.returncode == 0 else CommandStatus.FAILED
             return CommandResponse(
                 request_id=request.request_id,
                 status=status,
                 exit_code=process.returncode,
-                stdout="".join(stdout_chunks),
-                stderr="".join(stderr_chunks),
+                stdout=stdout_str,
+                stderr=stderr_str,
                 execution_time=time.time() - start_time
             )
-            
+        
         except Exception as e:
-            self.logger.exception(f"Streaming execution error: {e}")
+            self.logger.exception(f"Execution error: {e}")
             return CommandResponse(
                 request_id=request.request_id,
                 status=CommandStatus.FAILED,
@@ -448,27 +302,39 @@ class FileManager:
                     rel = os.path.relpath(full, path)
                     files.append(self._file_info(name, rel, full))
         else:
-            for name in os.listdir(path):
+            for name in sorted(os.listdir(path)):
                 full = os.path.join(path, name)
                 files.append(self._file_info(name, name, full))
         
         return files
     
     def _file_info(self, name: str, rel_path: str, full_path: str) -> FileInfo:
-        stat = os.stat(full_path)
-        is_dir = os.path.isdir(full_path)
-        return FileInfo(
-            request_id=str(uuid.uuid4()),
-            name=name,
-            path=rel_path,
-            size=stat.st_size if not is_dir else 0,
-            is_dir=is_dir,
-            modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            permissions=oct(stat.st_mode)[-3:]
-        )
+        """Get file info for a single file."""
+        try:
+            stat = os.stat(full_path)
+            is_dir = os.path.isdir(full_path)
+            return FileInfo(
+                request_id="",
+                name=name,
+                path=rel_path,
+                size=stat.st_size,
+                is_dir=is_dir,
+                modified=str(stat.st_mtime),
+                permissions=oct(stat.st_mode)[-3:]
+            )
+        except Exception:
+            return FileInfo(
+                request_id="",
+                name=name,
+                path=rel_path,
+                size=0,
+                is_dir=False,
+                modified="",
+                permissions="000"
+            )
 
 
-# ─── Main Server ─────────────────────────────────────────────────
+# ─── Main Server Class ───────────────────────────────────────────
 
 class RemoteAgentServer:
     """Main server class."""
@@ -478,6 +344,10 @@ class RemoteAgentServer:
         self.logger = logging.getLogger("server")
         self.executor = CommandExecutor(config)
         self.file_manager = FileManager(config)
+        
+        # Remote File Access Server
+        self.remote_file_server = RemoteFileServer(self._send_message)
+        
         self.sessions: Dict[str, ClientSession] = {}
         self.server: Optional[asyncio.Server] = None
         self.running = False
@@ -559,13 +429,15 @@ class RemoteAgentServer:
                 
                 # Handle message
                 await self._handle_message(message, reader, writer, session)
-                
+        
         except asyncio.IncompleteReadError:
             self.logger.info(f"Client {peer} disconnected")
         except Exception as e:
             self.logger.exception(f"Error handling client {peer}: {e}")
         finally:
             if session and session.session_id in self.sessions:
+                # Unregister from remote file server
+                self.remote_file_server.unregister_client(session.session_id)
                 del self.sessions[session.session_id]
             writer.close()
             await writer.wait_closed()
@@ -573,7 +445,20 @@ class RemoteAgentServer:
     async def _handle_message(self, message: BaseMessage, reader: asyncio.StreamReader,
                               writer: asyncio.StreamWriter, session: Optional[ClientSession]):
         """Route message to appropriate handler."""
-        if message.type == MessageType.AUTH_REQUEST:
+        # Remote File Access messages
+        if message.type in (
+            MessageType.REMOTE_FILE_OPEN,
+            MessageType.REMOTE_FILE_READ,
+            MessageType.REMOTE_FILE_WRITE,
+            MessageType.REMOTE_FILE_SEEK,
+            MessageType.REMOTE_FILE_CLOSE,
+            MessageType.REMOTE_FILE_STAT,
+            MessageType.REMOTE_FILE_LIST,
+            MessageType.REMOTE_FILE_CHUNK,
+            MessageType.REMOTE_FILE_ERROR,
+        ):
+            await self._handle_remote_file(message, session, writer)
+        elif message.type == MessageType.AUTH_REQUEST:
             await self._handle_auth(message, writer)
         elif message.type == MessageType.COMMAND_REQUEST:
             await self._handle_command(message, session, writer)
@@ -594,6 +479,21 @@ class RemoteAgentServer:
             writer.close()
         else:
             self.logger.warning(f"Unhandled message type: {message.type}")
+    
+    async def _handle_remote_file(self, message: BaseMessage, session: Optional[ClientSession], writer: asyncio.StreamWriter):
+        """Handle remote file access messages."""
+        if not session or not session.authenticated:
+            await self._send_message(writer, ErrorMessage(
+                code="NOT_AUTHENTICATED",
+                message="Not authenticated",
+                request_id=message.request_id
+            ))
+            return
+        
+        # Route to remote file server
+        response = await self.remote_file_server.handle_message(message)
+        if response:
+            await self._send_message(writer, response)
     
     async def _handle_auth(self, message: AuthRequest, writer: asyncio.StreamWriter):
         """Handle authentication request."""
@@ -620,10 +520,19 @@ class RemoteAgentServer:
                 connected_at=time.time(),
                 last_heartbeat=time.time(),
                 writer=writer,
-                reader=None,  # We have the reader in the handler
+                reader=reader,  # We have the reader in the handler
                 authenticated=True
             )
             self.sessions[session_id] = session
+            
+            # Register client with Remote File Server
+            client_mounts = {
+                "/": "/",
+                "/home": "/home",
+                "/data": "/data",
+                "/tmp": "/tmp",
+            }
+            self.remote_file_server.register_client(session_id, client_mounts)
             
             self.logger.info(f"Client authenticated: {message.client_name} (session: {session_id})")
             
@@ -647,28 +556,15 @@ class RemoteAgentServer:
             ))
             return
         
-        session.last_heartbeat = time.time()
-        
-        if message.stream_output:
-            # Streaming execution
-            async def send_chunk(chunk: CommandStream):
-                await self._send_message(writer, chunk)
-            
-            response = await self.executor.execute_streaming(message, session, send_chunk)
-        else:
-            # Regular execution
-            response = await self.executor.execute(message, session)
-        
+        response = await self.executor.execute(message, session)
         await self._send_message(writer, response)
     
     async def _handle_heartbeat(self, message: Heartbeat, session: ClientSession, writer: asyncio.StreamWriter):
-        """Handle heartbeat."""
+        """Handle heartbeat from client."""
         if session:
             session.last_heartbeat = time.time()
         
-        ack = Heartbeat(client_id=message.client_id)
-        ack.request_id = message.request_id
-        await self._send_message(writer, ack)
+        await self._send_message(writer, Heartbeat(client_id="server"))
     
     async def _handle_file_list(self, message: FileListRequest, session: ClientSession, writer: asyncio.StreamWriter):
         """Handle file listing request."""
@@ -707,9 +603,9 @@ class RemoteAgentServer:
                 message=str(e),
                 request_id=message.request_id
             ))
-
+    
     # ─── Shell/PTY Handlers ────────────────────────────────────────────
-
+    
     async def _handle_shell_start(self, message: ShellStartRequest, session: ClientSession, writer: asyncio.StreamWriter):
         """Start a new PTY shell session."""
         if not session or not session.authenticated:
@@ -720,32 +616,15 @@ class RemoteAgentServer:
             ))
             return
         
-        if "shell" not in session.capabilities:
+        if not self.config.allow_shell:
             await self._send_message(writer, ErrorMessage(
-                code="CAPABILITY_DENIED",
-                message="Shell capability not granted",
+                code="SHELL_DISABLED",
+                message="Shell access is disabled on this server",
                 request_id=message.request_id
             ))
             return
         
-        session.last_heartbeat = time.time()
-        
-        # Create PTY
-        master_fd, slave_fd = pty.openpty()
-        
-        # Set terminal size
-        winsize = struct.pack("HHHH", message.rows, message.cols, 0, 0)
-        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-        
-        # Prepare environment
-        env = os.environ.copy()
-        env.update(message.env)
-        env.update({
-            "TERM": "xterm-256color",
-            "COLUMNS": str(message.cols),
-            "LINES": str(message.rows),
-        })
-        
+        # Working directory
         cwd = message.cwd or session.current_dir
         if not os.path.isabs(cwd):
             cwd = os.path.join(session.current_dir, cwd)
@@ -756,6 +635,12 @@ class RemoteAgentServer:
         
         # Start shell process
         shell = os.environ.get("SHELL", "/bin/bash")
+        
+        master_fd, slave_fd = pty.openpty()
+        
+        env = os.environ.copy()
+        env.update(message.env)
+        env["TERM"] = "xterm-256color"
         
         process = await asyncio.create_subprocess_exec(
             shell,
@@ -800,7 +685,7 @@ class RemoteAgentServer:
             shell_id=shell_id
         )
         await self._send_message(writer, response)
-
+    
     async def _shell_reader(self, shell_session: ShellSession, session: ClientSession, writer: asyncio.StreamWriter):
         """Read from PTY master and send to client."""
         loop = asyncio.get_running_loop()
@@ -827,12 +712,12 @@ class RemoteAgentServer:
                         direction="stdout"
                     )
                     await self._send_message(writer, shell_data)
-                    
+                
                 except BlockingIOError:
                     await asyncio.sleep(0.01)
                 except OSError:
                     break
-                    
+        
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -856,7 +741,7 @@ class RemoteAgentServer:
                 pass
             
             self.logger.info(f"Shell {shell_session.shell_id} exited with code {exit_code}")
-
+    
     async def _handle_shell_data(self, message: ShellData, session: ClientSession, writer: asyncio.StreamWriter):
         """Handle stdin data for PTY shell."""
         if not session or not session.authenticated:
@@ -874,7 +759,7 @@ class RemoteAgentServer:
                 os.write(shell_session.master_fd, data)
             except Exception as e:
                 self.logger.error(f"Shell stdin write error: {e}")
-
+    
     async def _handle_shell_resize(self, message: ShellResize, session: ClientSession, writer: asyncio.StreamWriter):
         """Handle PTY terminal resize."""
         if not session or not session.authenticated:
@@ -893,7 +778,7 @@ class RemoteAgentServer:
             fcntl.ioctl(shell_session.master_fd, termios.TIOCSWINSZ, winsize)
         except Exception as e:
             self.logger.error(f"Shell resize error: {e}")
-
+    
     async def _handle_shell_exit(self, message: ShellExit, session: ClientSession, writer: asyncio.StreamWriter):
         """Handle shell exit request."""
         if not session or not session.authenticated:
@@ -959,21 +844,14 @@ async def main():
     config = ServerConfig.from_env()
     
     if not config.token:
-        print("ERROR: AGENT_TOKEN environment variable must be set", file=sys.stderr)
+        print("ERROR: AGENT_TOKEN environment variable is required")
         sys.exit(1)
     
     server = RemoteAgentServer(config)
-    
-    # Handle signals
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(server.stop()))
-    
     try:
         await server.start()
     except KeyboardInterrupt:
-        pass
-    finally:
+        print("\nShutting down...")
         await server.stop()
 
 
