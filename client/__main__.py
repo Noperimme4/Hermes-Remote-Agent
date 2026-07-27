@@ -20,7 +20,9 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
-from client.menu import InteractiveMenu, HermesClient, FileBrowser
+from client.menu import InteractiveMenu
+from client.hermes import run_hermes_panel
+from client.file_browser import FileBrowser
 from client.cli import RemoteAgentClient, ClientConfig
 from client.profile_manager import ProfileManager, ServerProfile
 
@@ -189,9 +191,8 @@ async def main():
             await client.interactive_shell(cwd=cwd)
         
         elif args.hermes:
-            # Hermes AI Chat
-            hermes = HermesClient(client)
-            await hermes.chat()
+            # Hermes AI Panel
+            await run_hermes_panel(client)
         
         elif args.files:
             # File Browser

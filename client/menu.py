@@ -19,8 +19,8 @@ from rich.tree import Tree
 
 from client.cli import RemoteAgentClient, CommandResult
 from client.file_browser import FileBrowser
-from client.hermes import HermesClient
-from client.profiles import ProfileManager
+from client.hermes import run_hermes_panel
+from client.profile_manager import ProfileManager
 
 
 @dataclass
@@ -109,9 +109,8 @@ class InteractiveMenu:
         await self.client.interactive_shell(cwd=self.current_dir)
     
     async def hermes_action(self):
-        """Start Hermes AI chat."""
-        hermes = HermesClient(self.client)
-        await hermes.chat()
+        """Start Hermes AI panel."""
+        await run_hermes_panel(self.client)
     
     async def files_action(self):
         """File browser."""

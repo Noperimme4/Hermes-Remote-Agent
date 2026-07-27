@@ -120,7 +120,7 @@ class ProfileManager:
             return self.profiles.get(self.current_profile)
         return None
     
-    def interactive(self) -> Optional[ServerProfile]:
+    async def interactive(self) -> Optional[ServerProfile]:
         """Interactive profile management."""
         while True:
             self.console.clear()
