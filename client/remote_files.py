@@ -84,47 +84,53 @@ class RemoteFileProvider:
             raise PermissionError(f"Path not allowed: {path}")
         return abs_path
     
-    async def handle_message(self, message: BaseMessage) -> Optional[BaseMessage]:
-        """Handle incoming remote file message from server."""
+    async def handle_message(self, message: BaseMessage) -> None:
+        """Handle incoming remote file message from server.
+        
+        All responses are sent via send_callback.
+        """
         if isinstance(message, RemoteFileOpenRequest):
-            return await self._handle_open(message)
+            await self._handle_open(message)
         elif isinstance(message, RemoteFileReadRequest):
-            return await self._handle_read(message)
+            await self._handle_read(message)
         elif isinstance(message, RemoteFileWriteRequest):
-            return await self._handle_write(message)
+            await self._handle_write(message)
         elif isinstance(message, RemoteFileSeekRequest):
-            return await self._handle_seek(message)
+            await self._handle_seek(message)
         elif isinstance(message, RemoteFileCloseRequest):
-            return await self._handle_close(message)
+            await self._handle_close(message)
         elif isinstance(message, RemoteFileStatRequest):
-            return await self._handle_stat(message)
+            await self._handle_stat(message)
         elif isinstance(message, RemoteFileListRequest):
-            return await self._handle_list(message)
-        return None
+            await self._handle_list(message)
     
-    async def _handle_open(self, req: RemoteFileOpenRequest) -> RemoteFileOpenResponse:
+    async def _handle_open(self, req: RemoteFileOpenRequest) -> None:
         try:
             local_path = self._resolve_path(req.path)
             
             if not os.path.exists(local_path):
-                return RemoteFileOpenResponse(
+                resp = RemoteFileOpenResponse(
                     request_id=req.request_id,
                     success=False,
                     error=f"File not found: {req.path}"
                 )
+                await self.send_callback(resp.to_json())
+                return
             
             is_dir = os.path.isdir(local_path)
             
             if is_dir:
                 # For directories, just return stat info
                 stat = os.stat(local_path)
-                return RemoteFileOpenResponse(
+                resp = RemoteFileOpenResponse(
                     request_id=req.request_id,
                     success=True,
                     handle="",
                     size=stat.st_size,
                     is_dir=True
                 )
+                await self.send_callback(resp.to_json())
+                return
             
             # Open file
             mode_map = {"rb": "rb", "r": "r", "wb": "wb", "w": "w"}
@@ -142,20 +148,30 @@ class RemoteFileProvider:
                 size=stat.st_size
             )
             
-            return RemoteFileOpenResponse(
+            resp = RemoteFileOpenResponse(
                 request_id=req.request_id,
                 success=True,
                 handle=handle_id,
                 size=stat.st_size,
                 is_dir=False
             )
+            await self.send_callback(resp.to_json())
         
         except PermissionError as e:
-            return RemoteFileOpenResponse(
+            resp = RemoteFileOpenResponse(
                 request_id=req.request_id,
                 success=False,
                 error=str(e)
             )
+            await self.send_callback(resp.to_json())
+        except Exception as e:
+            logger.exception(f"Open error: {e}")
+            resp = RemoteFileOpenResponse(
+                request_id=req.request_id,
+                success=False,
+                error=str(e)
+            )
+            await self.send_callback(resp.to_json())
         except Exception as e:
             logger.exception(f"Error opening remote file: {e}")
             return RemoteFileOpenResponse(
@@ -326,53 +342,56 @@ class RemoteFileProvider:
                 ).to_json()
             )
     
-    async def _handle_stat(self, req: RemoteFileStatRequest) -> RemoteFileStatResponse:
+    async def _handle_stat(self, req: RemoteFileStatRequest):
         try:
             local_path = self._resolve_path(req.path)
             
             if not os.path.exists(local_path):
-                return RemoteFileStatResponse(
+                await self.send_callback(RemoteFileStatResponse(
                     request_id=req.request_id,
                     success=False,
                     error=f"File not found: {req.path}"
-                )
+                ).to_json())
+                return
             
             stat = os.stat(local_path)
             is_dir = os.path.isdir(local_path)
             
-            return RemoteFileStatResponse(
+            await self.send_callback(RemoteFileStatResponse(
                 request_id=req.request_id,
                 success=True,
                 size=stat.st_size,
                 is_dir=is_dir,
                 modified=str(stat.st_mtime),
                 permissions=oct(stat.st_mode)[-3:]
-            )
+            ).to_json())
         
         except PermissionError as e:
-            return RemoteFileStatResponse(
+            await self.send_callback(RemoteFileStatResponse(
                 request_id=req.request_id,
                 success=False,
                 error=str(e)
-            )
+            ).to_json())
         except Exception as e:
             logger.exception(f"Error stating remote file: {e}")
-            return RemoteFileStatResponse(
+            await self.send_callback(RemoteFileStatResponse(
                 request_id=req.request_id,
                 success=False,
                 error=str(e)
-            )
+            ).to_json())
     
-    async def _handle_list(self, req: RemoteFileListRequest) -> RemoteFileListResponse:
+    async def _handle_list(self, req: RemoteFileListRequest):
         try:
             local_path = self._resolve_path(req.path)
             
             if not os.path.isdir(local_path):
-                return RemoteFileListResponse(
+                await self.send_callback(RemoteFileListResponse(
                     request_id=req.request_id,
                     success=False,
-                    error=f"Not a directory: {req.path}"
-                )
+                    error=f"Not a directory: {req.path}",
+                    entries=[]
+                ).to_json())
+                return
             
             entries = []
             for name in sorted(os.listdir(local_path)):
@@ -391,6 +410,39 @@ class RemoteFileProvider:
                     ))
                 except Exception:
                     continue
+            
+            # Send entries in batches
+            batch_size = 50
+            for i in range(0, len(entries), batch_size):
+                batch = entries[i:i+batch_size]
+                await self.send_callback(RemoteFileListResponse(
+                    request_id=req.request_id,
+                    success=True,
+                    entries=batch
+                ).to_json())
+            
+            # Send end marker
+            await self.send_callback(RemoteFileListResponse(
+                request_id=req.request_id,
+                success=True,
+                entries=[]
+            ).to_json())
+        
+        except PermissionError as e:
+            await self.send_callback(RemoteFileListResponse(
+                request_id=req.request_id,
+                success=False,
+                error=str(e),
+                entries=[]
+            ).to_json())
+        except Exception as e:
+            logger.exception(f"Error listing remote directory: {e}")
+            await self.send_callback(RemoteFileListResponse(
+                request_id=req.request_id,
+                success=False,
+                error=str(e),
+                entries=[]
+            ).to_json())
             
             return RemoteFileListResponse(
                 request_id=req.request_id,

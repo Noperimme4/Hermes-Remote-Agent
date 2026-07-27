@@ -33,7 +33,7 @@ class MessageType(Enum):
     FILE_DOWNLOAD = "file_download"
     FILE_LIST = "file_list"
     
-    # Remote File Access (Virtual FS)
+    # Remote File Access (Virtual FS) - Requests
     REMOTE_FILE_OPEN = "remote_file_open"
     REMOTE_FILE_READ = "remote_file_read"
     REMOTE_FILE_WRITE = "remote_file_write"
@@ -41,8 +41,13 @@ class MessageType(Enum):
     REMOTE_FILE_CLOSE = "remote_file_close"
     REMOTE_FILE_STAT = "remote_file_stat"
     REMOTE_FILE_LIST = "remote_file_list"
+    
+    # Remote File Access - Responses
+    REMOTE_FILE_OPEN_RESPONSE = "remote_file_open_response"
     REMOTE_FILE_CHUNK = "remote_file_chunk"
     REMOTE_FILE_ERROR = "remote_file_error"
+    REMOTE_FILE_STAT_RESPONSE = "remote_file_stat_response"
+    REMOTE_FILE_LIST_RESPONSE = "remote_file_list_response"
     
     # Process management
     PROCESS_LIST = "process_list"
@@ -230,14 +235,14 @@ class RemoteFileOpenRequest(BaseMessage):
 class RemoteFileOpenResponse(BaseMessage):
     """Response to remote file open request."""
     request_id: str
-    handle: Optional[str] = None
     success: bool = True
     error: str = ""
+    handle: str = ""
     size: int = 0
     is_dir: bool = False
     
     def __post_init__(self):
-        self.type = MessageType.REMOTE_FILE_OPEN
+        self.type = MessageType.REMOTE_FILE_OPEN_RESPONSE
 
 
 @dataclass(kw_only=True)
@@ -308,7 +313,7 @@ class RemoteFileStatResponse(BaseMessage):
     permissions: str = ""
     
     def __post_init__(self):
-        self.type = MessageType.REMOTE_FILE_STAT
+        self.type = MessageType.REMOTE_FILE_STAT_RESPONSE
 
 
 @dataclass(kw_only=True)
@@ -330,7 +335,7 @@ class RemoteFileListResponse(BaseMessage):
     error: str = ""
     
     def __post_init__(self):
-        self.type = MessageType.REMOTE_FILE_LIST
+        self.type = MessageType.REMOTE_FILE_LIST_RESPONSE
 
 
 @dataclass(kw_only=True)
@@ -443,6 +448,9 @@ _TYPE_MAP = {
     MessageType.REMOTE_FILE_LIST: RemoteFileListRequest,
     MessageType.REMOTE_FILE_CHUNK: RemoteFileChunk,
     MessageType.REMOTE_FILE_ERROR: RemoteFileError,
+    MessageType.REMOTE_FILE_OPEN_RESPONSE: RemoteFileOpenResponse,
+    MessageType.REMOTE_FILE_STAT_RESPONSE: RemoteFileStatResponse,
+    MessageType.REMOTE_FILE_LIST_RESPONSE: RemoteFileListResponse,
 }
 
 
