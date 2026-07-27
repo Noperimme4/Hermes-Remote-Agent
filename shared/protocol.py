@@ -37,10 +37,11 @@ class MessageType(Enum):
     PROCESS_LIST = "process_list"
     PROCESS_KILL = "process_kill"
     
-    # Shell/Interactive
+    # Shell/Interactive PTY
     SHELL_START = "shell_start"
     SHELL_DATA = "shell_data"
     SHELL_RESIZE = "shell_resize"
+    SHELL_EXIT = "shell_exit"
 
 
 class CommandStatus(Enum):
@@ -172,8 +173,8 @@ class ErrorMessage(BaseMessage):
     
     def __post_init__(self):
         self.type = MessageType.ERROR
-
 # ─── File Operations ─────────────────────────────────────────────
+
 
 @dataclass(kw_only=True)
 class FileListRequest(BaseMessage):
@@ -201,6 +202,65 @@ class FileInfo(BaseMessage):
         self.type = MessageType.FILE_LIST
 
 
+# ─── PTY Shell Operations ────────────────────────────────────────
+
+
+@dataclass(kw_only=True)
+class ShellStartRequest(BaseMessage):
+    """Start a new PTY shell session."""
+    cols: int = 80
+    rows: int = 24
+    env: Dict[str, str] = field(default_factory=dict)
+    cwd: Optional[str] = None
+    
+    def __post_init__(self):
+        self.type = MessageType.SHELL_START
+
+
+@dataclass(kw_only=True)
+class ShellStartResponse(BaseMessage):
+    """Response to shell start request."""
+    request_id: str
+    success: bool
+    message: str
+    shell_id: Optional[str] = None
+    
+    def __post_init__(self):
+        self.type = MessageType.SHELL_START
+
+
+@dataclass(kw_only=True)
+class ShellData(BaseMessage):
+    """PTY data chunk (stdin/stdout)."""
+    shell_id: str
+    data: str  # base64 encoded binary data
+    direction: str  # "stdin" (client->server) or "stdout" (server->client)
+    
+    def __post_init__(self):
+        self.type = MessageType.SHELL_DATA
+
+
+@dataclass(kw_only=True)
+class ShellResize(BaseMessage):
+    """Resize PTY terminal."""
+    shell_id: str
+    cols: int
+    rows: int
+    
+    def __post_init__(self):
+        self.type = MessageType.SHELL_RESIZE
+
+
+@dataclass(kw_only=True)
+class ShellExit(BaseMessage):
+    """Exit/close PTY shell session."""
+    shell_id: str
+    exit_code: Optional[int] = None
+    
+    def __post_init__(self):
+        self.type = MessageType.SHELL_EXIT
+
+
 # ─── Message Parsing ─────────────────────────────────────────────
 
 _TYPE_MAP = {
@@ -213,6 +273,10 @@ _TYPE_MAP = {
     MessageType.ERROR: ErrorMessage,
     MessageType.FILE_LIST: FileListRequest,
     MessageType.DISCONNECT: BaseMessage,
+    MessageType.SHELL_START: ShellStartRequest,
+    MessageType.SHELL_DATA: ShellData,
+    MessageType.SHELL_RESIZE: ShellResize,
+    MessageType.SHELL_EXIT: ShellExit,
 }
 
 

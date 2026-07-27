@@ -7,14 +7,19 @@ import asyncio
 import json
 import logging
 import os
+import pty
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
+import fcntl
+import base64
 
 # Add shared to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
@@ -23,6 +28,7 @@ from protocol import (
     MessageType, CommandStatus, BaseMessage,
     AuthRequest, AuthResponse, CommandRequest, CommandResponse,
     CommandStream, Heartbeat, ErrorMessage, FileListRequest, FileInfo,
+    ShellStartRequest, ShellStartResponse, ShellData, ShellResize, ShellExit,
     parse_message
 )
 
@@ -107,6 +113,22 @@ class ClientSession:
     current_dir: str = "/data/workspace"
     active_commands: Dict[str, asyncio.Task] = field(default_factory=dict)
     authenticated: bool = False
+    shells: Dict[str, 'ShellSession'] = field(default_factory=dict)
+
+
+@dataclass
+class ShellSession:
+    """Represents a PTY shell session."""
+    shell_id: str
+    session_id: str
+    master_fd: int
+    slave_fd: int
+    process: asyncio.subprocess.Process
+    cols: int
+    rows: int
+    created_at: float
+    last_activity: float
+    reader_task: Optional[asyncio.Task] = None
 
 
 # ─── Command Executor ────────────────────────────────────────────
@@ -559,6 +581,14 @@ class RemoteAgentServer:
             await self._handle_heartbeat(message, session, writer)
         elif message.type == MessageType.FILE_LIST:
             await self._handle_file_list(message, session, writer)
+        elif message.type == MessageType.SHELL_START:
+            await self._handle_shell_start(message, session, writer)
+        elif message.type == MessageType.SHELL_DATA:
+            await self._handle_shell_data(message, session, writer)
+        elif message.type == MessageType.SHELL_RESIZE:
+            await self._handle_shell_resize(message, session, writer)
+        elif message.type == MessageType.SHELL_EXIT:
+            await self._handle_shell_exit(message, session, writer)
         elif message.type == MessageType.DISCONNECT:
             self.logger.info("Client requested disconnect")
             writer.close()
@@ -677,6 +707,223 @@ class RemoteAgentServer:
                 message=str(e),
                 request_id=message.request_id
             ))
+
+    # ─── Shell/PTY Handlers ────────────────────────────────────────────
+
+    async def _handle_shell_start(self, message: ShellStartRequest, session: ClientSession, writer: asyncio.StreamWriter):
+        """Start a new PTY shell session."""
+        if not session or not session.authenticated:
+            await self._send_message(writer, ErrorMessage(
+                code="NOT_AUTHENTICATED",
+                message="Not authenticated",
+                request_id=message.request_id
+            ))
+            return
+        
+        if "shell" not in session.capabilities:
+            await self._send_message(writer, ErrorMessage(
+                code="CAPABILITY_DENIED",
+                message="Shell capability not granted",
+                request_id=message.request_id
+            ))
+            return
+        
+        session.last_heartbeat = time.time()
+        
+        # Create PTY
+        master_fd, slave_fd = pty.openpty()
+        
+        # Set terminal size
+        winsize = struct.pack("HHHH", message.rows, message.cols, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+        
+        # Prepare environment
+        env = os.environ.copy()
+        env.update(message.env)
+        env.update({
+            "TERM": "xterm-256color",
+            "COLUMNS": str(message.cols),
+            "LINES": str(message.rows),
+        })
+        
+        cwd = message.cwd or session.current_dir
+        if not os.path.isabs(cwd):
+            cwd = os.path.join(session.current_dir, cwd)
+        cwd = os.path.normpath(cwd)
+        
+        if not os.path.exists(cwd):
+            cwd = session.current_dir
+        
+        # Start shell process
+        shell = os.environ.get("SHELL", "/bin/bash")
+        
+        process = await asyncio.create_subprocess_exec(
+            shell,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+        )
+        
+        # Close slave_fd in parent (we only need master_fd)
+        os.close(slave_fd)
+        
+        # Create shell session
+        shell_id = str(uuid.uuid4())
+        shell_session = ShellSession(
+            shell_id=shell_id,
+            session_id=session.session_id,
+            master_fd=master_fd,
+            slave_fd=-1,  # Already closed
+            process=process,
+            cols=message.cols,
+            rows=message.rows,
+            created_at=time.time(),
+            last_activity=time.time(),
+        )
+        
+        session.shells[shell_id] = shell_session
+        
+        # Start reader task to forward PTY output to client
+        shell_session.reader_task = asyncio.create_task(
+            self._shell_reader(shell_session, session, writer)
+        )
+        
+        self.logger.info(f"Started shell {shell_id} for session {session.session_id}")
+        
+        response = ShellStartResponse(
+            request_id=message.request_id,
+            success=True,
+            message="Shell started",
+            shell_id=shell_id
+        )
+        await self._send_message(writer, response)
+
+    async def _shell_reader(self, shell_session: ShellSession, session: ClientSession, writer: asyncio.StreamWriter):
+        """Read from PTY master and send to client."""
+        loop = asyncio.get_running_loop()
+        master_fd = shell_session.master_fd
+        
+        # Make master_fd non-blocking
+        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        
+        try:
+            while self.running and shell_session.process.returncode is None:
+                try:
+                    data = await loop.run_in_executor(None, os.read, master_fd, 4096)
+                    if not data:
+                        break
+                    
+                    shell_session.last_activity = time.time()
+                    
+                    # Send as base64 encoded data
+                    encoded = base64.b64encode(data).decode('ascii')
+                    shell_data = ShellData(
+                        shell_id=shell_session.shell_id,
+                        data=encoded,
+                        direction="stdout"
+                    )
+                    await self._send_message(writer, shell_data)
+                    
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+                except OSError:
+                    break
+                    
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.error(f"Shell reader error: {e}")
+        finally:
+            # Process exited
+            exit_code = shell_session.process.returncode
+            if exit_code is None:
+                try:
+                    exit_code = await shell_session.process.wait()
+                except:
+                    exit_code = -1
+            
+            shell_exit = ShellExit(
+                shell_id=shell_session.shell_id,
+                exit_code=exit_code
+            )
+            try:
+                await self._send_message(writer, shell_exit)
+            except:
+                pass
+            
+            self.logger.info(f"Shell {shell_session.shell_id} exited with code {exit_code}")
+
+    async def _handle_shell_data(self, message: ShellData, session: ClientSession, writer: asyncio.StreamWriter):
+        """Handle stdin data for PTY shell."""
+        if not session or not session.authenticated:
+            return
+        
+        shell_session = session.shells.get(message.shell_id)
+        if not shell_session:
+            return
+        
+        shell_session.last_activity = time.time()
+        
+        if message.direction == "stdin":
+            try:
+                data = base64.b64decode(message.data)
+                os.write(shell_session.master_fd, data)
+            except Exception as e:
+                self.logger.error(f"Shell stdin write error: {e}")
+
+    async def _handle_shell_resize(self, message: ShellResize, session: ClientSession, writer: asyncio.StreamWriter):
+        """Handle PTY terminal resize."""
+        if not session or not session.authenticated:
+            return
+        
+        shell_session = session.shells.get(message.shell_id)
+        if not shell_session:
+            return
+        
+        shell_session.cols = message.cols
+        shell_session.rows = message.rows
+        shell_session.last_activity = time.time()
+        
+        winsize = struct.pack("HHHH", message.rows, message.cols, 0, 0)
+        try:
+            fcntl.ioctl(shell_session.master_fd, termios.TIOCSWINSZ, winsize)
+        except Exception as e:
+            self.logger.error(f"Shell resize error: {e}")
+
+    async def _handle_shell_exit(self, message: ShellExit, session: ClientSession, writer: asyncio.StreamWriter):
+        """Handle shell exit request."""
+        if not session or not session.authenticated:
+            return
+        
+        shell_session = session.shells.pop(message.shell_id, None)
+        if not shell_session:
+            return
+        
+        if shell_session.reader_task:
+            shell_session.reader_task.cancel()
+            try:
+                await shell_session.reader_task
+            except asyncio.CancelledError:
+                pass
+        
+        if shell_session.process.returncode is None:
+            shell_session.process.terminate()
+            try:
+                await asyncio.wait_for(shell_session.process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                shell_session.process.kill()
+                await shell_session.process.wait()
+        
+        try:
+            os.close(shell_session.master_fd)
+        except:
+            pass
+        
+        self.logger.info(f"Shell {message.shell_id} closed")
     
     async def _heartbeat_monitor(self):
         """Monitor client heartbeats and disconnect stale ones."""
