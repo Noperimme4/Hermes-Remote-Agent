@@ -326,6 +326,425 @@ Select option [1]:
 
 ---
 
+## 🔧 نصب پیشرفته (Production / Advanced)
+
+> **برای محیط پروداکشن، امنیت بالا، و کنترل کامل** — نصب دستی، هاردنینگ، TLS، فایروال، مانیتورینگ.
+
+---
+
+### پیش‌نیازهای پروداکشن
+
+| مورد | حداقل | توصیه شده | چک |
+|------|--------|-----------|-----|
+| **OS** | Ubuntu 20.04+, Debian 11+ | Ubuntu 22.04 LTS / Debian 12 | ☐ |
+| **Python** | 3.10 | 3.11 یا 3.12 | ☐ |
+| **RAM** | 512 MB | 1 GB+ | ☐ |
+| **Disk** | 1 GB | 5 GB+ (لاگ‌ها/داده‌ها) | ☐ |
+| **Network** | IPv4 | IPv4 + IPv6، فایروال کانفیگ | ☐ |
+| **Access** | sudo/root | یوزر غیر روت با sudo محدود | ☐ |
+
+**بررسی سریع سرور:**
+```bash
+lsb_release -a          # توزیع
+python3 --version       # 3.10+
+free -h                 # رم
+df -h /                 # دیسک
+ip a | grep inet        # IPها
+sudo -n true 2>&1 && echo "sudo OK" || echo "sudo needed"
+```
+
+---
+
+### ۱. هاردنینگ پایه سرور
+
+```bash
+# آپدیت و ابزارها
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y curl wget git ca-certificates gnupg lsb-release \
+    python3 python3-venv python3-dev build-essential \
+    ufw fail2ban htop net-tools logrotate
+
+# فایروال (فقط SSH + Agent)
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow ssh
+sudo ufw allow 8765/tcp comment 'Remote Agent'
+sudo ufw --force enable
+sudo ufw status verbose
+
+# SSH سخت‌سازی
+sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl reload sshd
+
+# Timezone
+sudo timedatectl set-timezone Asia/Tehran
+```
+
+---
+
+### ۲. نصب دستی سرور (بدون اسکریپت خودکار)
+
+> کنترل کامل، مناسب برای Ansible/Terraform/CI-CD
+
+#### ۲.۱ یوزر و دایرکتوری‌ها
+```bash
+# یوزر سیستمی
+sudo useradd -r -s /bin/bash -d /opt/remote-agent -m remote-agent
+
+# دایرکتوری‌ها
+sudo mkdir -p /opt/remote-agent/{server,shared,scripts,venv}
+sudo mkdir -p /etc/remote-agent
+sudo mkdir -p /var/log/remote-agent
+sudo mkdir -p /data/workspace
+
+sudo chown -R remote-agent:remote-agent /opt/remote-agent /var/log/remote-agent /data/workspace
+sudo chmod 750 /etc/remote-agent
+sudo chmod 755 /data/workspace
+```
+
+#### ۲.۲ کد و محیط مجازی
+```bash
+# از پوشه کلون شده
+cd /opt/remote-agent
+rsync -a /path/to/cloned/remote-agent/server/ /opt/remote-agent/server/
+rsync -a /path/to/cloned/remote-agent/shared/ /opt/remote-agent/shared/
+rsync -a /path/to/cloned/remote-agent/scripts/ /opt/remote-agent/scripts/
+sudo chown -R remote-agent:remote-agent /opt/remote-agent
+
+# venv و dependencies
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r server/requirements.txt
+python -c "from server.agent import RemoteAgentServer; print('✓ Import OK')"
+deactivate
+```
+
+#### ۲.۳ توکن و کانفیگ امن
+```bash
+# توکن امن
+TOKEN=$(openssl rand -hex 32)
+echo "TOKEN=$TOKEN"
+
+# کانفیگ کامل
+sudo tee /etc/remote-agent/server.env > /dev/null <<EOF
+# Network
+AGENT_HOST=0.0.0.0
+AGENT_PORT=8765
+
+# Auth (REQUIRED)
+AGENT_TOKEN=$TOKEN
+
+# Security - Allowed (comma-separated, no spaces)
+AGENT_ALLOWED_COMMANDS=ls,cat,head,tail,grep,find,ps,top,htop,df,du,free,uptime,whoami,pwd,date,python3,pip,git,docker,kubectl,systemctl,journalctl,ssh,scp,rsync,tar,zip,unzip,mkdir,cp,mv,rm,chmod,chown,ln,apt,apt-get,yum,dnf,pacman,pip3,npm,make,cmake,cargo,go,rustc,gcc,clang,vim,nano,less,more,bat,fd,rg,curl,wget,ping,dig,host,nslookup,ip,ss,netstat,lsof,stat,file,diff,patch,tee,awk,sed,cut,sort,uniq,wc,tr,xargs
+
+# Security - Blocked (never allowed)
+AGENT_BLOCKED_COMMANDS=reboot,shutdown,halt,poweroff,mkfs,fdisk,parted,dd,wipefs,cryptsetup,passwd,userdel,groupdel,visudo,chroot,pivot_root,kexec,mount,umount,su,sudo,doas,runuser
+
+# Limits
+AGENT_MAX_TIMEOUT=300
+AGENT_DEFAULT_TIMEOUT=60
+AGENT_ALLOW_SHELL=false
+AGENT_ALLOW_FILES=true
+
+# Logging
+AGENT_LOG_LEVEL=INFO
+AGENT_LOG_FILE=/var/log/remote-agent/server.log
+
+# Working Directory
+AGENT_WORKDIR=/data/workspace
+
+# TLS (uncomment for production)
+# AGENT_TLS_CERT=/etc/remote-agent/certs/cert.pem
+# AGENT_TLS_KEY=/etc/remote-agent/certs/key.pem
+EOF
+
+sudo chmod 600 /etc/remote-agent/server.env
+sudo chown remote-agent:remote-agent /etc/remote-agent/server.env
+cat /etc/remote-agent/server.env
+```
+
+---
+
+### ۳. سرویس systemd هاردند شده
+
+```bash
+sudo tee /etc/systemd/system/remote-agent.service > /dev/null <<'EOF'
+[Unit]
+Description=Remote Agent Server
+Documentation=https://github.com/Noperimme4/remote-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remote-agent
+Group=remote-agent
+WorkingDirectory=/opt/remote-agent
+EnvironmentFile=/etc/remote-agent/server.env
+ExecStart=/opt/remote-agent/venv/bin/python -m server.agent
+ExecReload=/bin/kill -HUP \$MAINPID
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryLimit=512M
+CPUQuota=200%
+
+StandardOutput=append:/var/log/remote-agent/server.log
+StandardError=append:/var/log/remote-agent/server.log
+SyslogIdentifier=remote-agent
+
+# Security Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+PrivateDevices=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+ReadWritePaths=/opt/remote-agent /var/log/remote-agent /data/workspace /etc/remote-agent
+ReadOnlyPaths=/usr /lib /lib64
+
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable remote-agent
+```
+
+---
+
+### ۴. شروع و وریفای
+
+```bash
+sudo systemctl start remote-agent
+sudo systemctl status remote-agent --no-pager
+sudo journalctl -u remote-agent -f --no-pager
+
+# تست پورت
+ss -tlnp | grep 8765
+
+# تست لوکال
+cd /opt/remote-agent
+AGENT_TOKEN=$(grep AGENT_TOKEN /etc/remote-agent/server.env | cut -d= -f2)
+export AGENT_TOKEN
+./venv/bin/python -m client.cli --host 127.0.0.1 -c "echo 'Local OK'"
+```
+
+---
+
+### ۵. TLS/SSL (برای اینترنت عمومی)
+
+#### Self-signed (تست/داخلی)
+```bash
+sudo mkdir -p /etc/remote-agent/certs
+sudo openssl req -x509 -newkey rsa:4096 -keyout /etc/remote-agent/certs/key.pem \
+    -out /etc/remote-agent/certs/cert.pem -days 365 -nodes \
+    -subj "/CN=remote-agent"
+sudo chown remote-agent:remote-agent /etc/remote-agent/certs/*.pem
+sudo chmod 600 /etc/remote-agent/certs/key.pem
+
+sudo sed -i 's|# AGENT_TLS_CERT=|AGENT_TLS_CERT=/etc/remote-agent/certs/cert.pem|' /etc/remote-agent/server.env
+sudo sed -i 's|# AGENT_TLS_KEY=|AGENT_TLS_KEY=/etc/remote-agent/certs/key.pem|' /etc/remote-agent/server.env
+sudo systemctl restart remote-agent
+```
+
+#### Let's Encrypt (دامنه واقعی)
+```bash
+sudo apt install certbot
+sudo certbot certonly --standalone -d agent.yourdomain.com
+
+# در server.env:
+# AGENT_TLS_CERT=/etc/letsencrypt/live/agent.yourdomain.com/fullchain.pem
+# AGENT_TLS_KEY=/etc/letsencrypt/live/agent.yourdomain.com/privkey.pem
+
+# تازه‌سازی خودکار
+echo "0 3 * * * root certbot renew --quiet --post-hook 'systemctl reload remote-agent'" | sudo tee /etc/cron.d/certbot-remote-agent
+```
+
+**کلاینت با TLS:**
+```bash
+export AGENT_USE_TLS=true
+export AGENT_CA_CERT=/path/to/cert.pem  # کپی cert.pem از سرور
+agent --host YOUR_SERVER -i
+```
+
+---
+
+### ۶. فایروال پیشرفته (IP محدود)
+
+```bash
+# حذف قانون پیش‌فرض
+sudo ufw delete allow 8765/tcp
+
+# فقط IPهای مجاز
+sudo ufw allow from 203.0.113.0/24 to any port 8765 proto tcp comment 'Office IP'
+sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp comment 'VPN Range'
+sudo ufw allow from YOUR_HOME_IP to any port 8765 proto tcp comment 'Home IP'
+
+# یا iptables مستقیم
+sudo iptables -A INPUT -p tcp -s YOUR_CLIENT_IP --dport 8765 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8765 -j DROP
+```
+
+---
+
+### ۷. Fail2Ban (محافظت از brute-force)
+
+```bash
+sudo tee /etc/fail2ban/jail.d/remote-agent.conf > /dev/null <<'EOF'
+[remote-agent]
+enabled = true
+port = 8765
+filter = remote-agent
+logpath = /var/log/remote-agent/server.log
+maxretry = 5
+bantime = 3600
+findtime = 600
+EOF
+
+sudo tee /etc/fail2ban/filter.d/remote-agent.conf > /dev/null <<'EOF'
+[Definition]
+failregex = Authentication failed from <HOST>
+            Invalid token from <HOST>
+            Connection refused from <HOST>
+ignoreregex =
+EOF
+
+sudo systemctl restart fail2ban
+sudo fail2ban-client status remote-agent
+```
+
+---
+
+### ۸. Logrotate (مدیریت لاگ‌ها)
+
+```bash
+sudo tee /etc/logrotate.d/remote-agent > /dev/null <<'EOF'
+/var/log/remote-agent/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 640 remote-agent remote-agent
+    sharedscripts
+    postrotate
+        systemctl reload remote-agent > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+# تست
+sudo logrotate -d /etc/logrotate.d/remote-agent
+```
+
+---
+
+### ۹. کلاینت و پروفایل‌ها
+
+```bash
+# نصب کلاینت
+pipx install git+https://github.com/Noperimme4/remote-agent.git
+
+# پروفایل پیش‌فرض
+mkdir -p ~/.config/remote-agent
+cat > ~/.config/remote-agent/profiles.json <<EOF
+{
+  "profiles": {
+    "prod": {
+      "name": "prod",
+      "host": "YOUR_SERVER_IP",
+      "port": 8765,
+      "token": "YOUR_TOKEN",
+      "use_tls": true,
+      "ca_cert": "~/certs/remote-agent-cert.pem",
+      "timeout": 60,
+      "cwd": "/data/workspace",
+      "description": "Production Server"
+    }
+  },
+  "current": "prod"
+}
+EOF
+chmod 600 ~/.config/remote-agent/profiles.json
+```
+
+---
+
+### ۱۰. چک‌لیست پروداکشن (قبل از Go-Live)
+
+| مورد | چک | دستور |
+|------|-----|-------|
+| سرویس running | ☐ | `systemctl is-active remote-agent` |
+| توکن امن ذخیره شده | ☐ | `cat /etc/remote-agent/server.env` |
+| فایروال IP محدود | ☐ | `sudo ufw status numbered` |
+| TLS فعال (اگر عمومی) | ☐ | `openssl s_client -connect IP:8765` |
+| Logrotate کانفیگ | ☐ | `cat /etc/logrotate.d/remote-agent` |
+| Fail2Ban فعال | ☐ | `sudo fail2ban-client status remote-agent` |
+| بک‌آپ کانفیگ | ☐ | `tar -czf backup.tar.gz /etc/remote-agent` |
+| تست کلاینت | ☐ | `agent --profile prod -c "echo OK"` |
+| مانیتورینگ لاگ | ☐ | `journalctl -u remote-agent -f` |
+
+---
+
+### ۱۱. عیب‌یابی پروداکشن
+
+| خطا | چک | راه‌حل |
+|-----|-----|--------|
+| `Address already in use` | `ss -tlnp \| grep 8765` | Kill PID قبلی |
+| `Permission denied` | پرمیشن دایرکتوری‌ها | `chown -R remote-agent: /opt/remote-agent /data/workspace` |
+| `Authentication failed` | توکن mismatch | توکن کلاینت/سرور یکسان باشد |
+| `Command not allowed` | در ALLOWED_COMMANDS نیست | اضافه در `/etc/remote-agent/server.env` |
+| `Timeout` | دستور طولانی | افزایش `AGENT_MAX_TIMEOUT` |
+
+---
+
+### ۱۲. آپدیت و حذف
+
+```bash
+# آپدیت سرور
+cd /opt/remote-agent && sudo -u remote-agent git pull && sudo -u remote-agent ./venv/bin/pip install -r server/requirements.txt && sudo systemctl restart remote-agent
+
+# آپدیت کلاینت
+pipx upgrade remote-agent
+
+# حذف کامل
+sudo systemctl stop remote-agent && sudo systemctl disable remote-agent
+sudo rm /etc/systemd/system/remote-agent.service && sudo systemctl daemon-reload
+sudo rm -rf /opt/remote-agent /etc/remote-agent /var/log/remote-agent /data/workspace
+sudo userdel remote-agent
+sudo ufw delete allow 8765/tcp
+pipx uninstall remote-agent
+rm -rf ~/.config/remote-agent
+```
+
+---
+
 ## 🐳 نصب با Docker
 
 ### پیش‌نیاز: Docker و Docker Compose
