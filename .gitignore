@@ -1,0 +1,61 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.whl
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+/var/log/remote-agent/
+
+# Config (contains secrets)
+/etc/remote-agent/server.env
+C:\ProgramData\RemoteAgent\server.env
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.p12
+
+# Runtime
+*.pid
+*.sock
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+*.pyc
+
+# Local development
+.env
+.env.local
+*.local

@@ -1,0 +1,20 @@
+# Remote Agent Client Requirements
+# Minimal dependencies for the CLI client
+
+# CLI
+click>=8.1.0
+rich>=13.0.0
+
+# Network (stdlib in Python 3.10+)
+# asyncio, ssl, json, uuid, datetime - all built-in
+
+# Development / Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Type checking
+mypy>=1.5.0
+
+# Linting
+ruff>=0.1.0
