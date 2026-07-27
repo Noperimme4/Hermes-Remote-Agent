@@ -31,64 +31,40 @@
 
 ## 📋 فهرست مطالب
 
-- [🚀 نصب](#-نصب)
-  - [گزینه ۱: نصب آسان (یک خط)](#گزینه-۱-نصب-آسان-یک-خط)
-  - [گزینه ۲: نصب کامل (مرحله به مرحله)](#گزینه-۲-نصب-کامل-مرحله-به-مرحله)
-  - [نصب کلاینت](#نصب-کلاینت)
-  - [نصب با Docker](#نصب-با-docker)
-  - [نصب روی Windows](#نصب-روی-windows)
+- [⚡ نصب آسان (یک خط)](#-نصب-آسان-یک-خط)
+  - [سرور (Linux)](#سرور-linux)
+  - [کلاینت (همه پلتفرم‌ها)](#کلاینت-همه-پلتفرم‌ها)
+- [📖 نصب کامل (مرحله به مرحله برای مبتدیان)](#-نصب-کامل-مرحله-به-مرحله-برای-مبتدیان)
+  - [پیش‌نیازها](#پیش‌نیازها)
+  - [مرحله ۱: کلون ریپو](#مرحله-۱-کلون-ریپو)
+  - [مرحله ۲: نصب سرور روی لینوکس](#مرحله-۲-نصب-سرور-روی-لینوکس)
+  - [مرحله ۳: شروع سرویس و گرفتن توکن](#مرحله-۳-شروع-سرویس-و-گرفتن-توکن)
+  - [مرحله ۴: نصب کلاینت روی سیستم خودتان](#مرحله-۴-نصب-کلاینت-روی-سیستم-خودتان)
+  - [مرحله ۵: اتصال و تست](#مرحله-۵-اتصال-و-تست)
+- [🐳 نصب با Docker](#-نصب-با-docker)
+- [🪟 نصب روی Windows](#-نصب-روی-windows)
 - [🔑 اتصال و استفاده](#-اتصال-و-استفاده)
 - [🎯 منوی تعاملی](#-منوی-تعاملی)
 - [⌨️ تمام دستورات CLI](#️-تمام-دستورات-cli)
+- [👤 مدیریت پروفایل‌ها](#-مدیریت-پروفایل‌ها)
 - [⚙️ تنظیمات سرور](#️-تنظیمات-سرور)
 - [🔐 امنیت](#-امنیت)
-- [🐳 Docker](#-docker)
-- [🪟 Windows](#-windows)
 - [🐛 عیب‌یابی](#-عیب‌یابی)
 
 ---
 
-## 🚀 نصب
+## ⚡ نصب آسان (یک خط)
 
-### گزینه ۱: نصب آسان (یک خط)
+> **برای کاربران با تجربه** — فقط کپی کنید، پیست کنید، اینتر بزنید.
 
-**سرور (Linux):**
+### سرور (Linux)
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Noperimme4/remote-agent/main/scripts/install.sh | sudo bash
 ```
 
-**کلاینت:**
+**خروجی:**
 ```bash
-# با pipx (توصیه شده - ایزوله)
-pipx install git+https://github.com/Noperimme4/remote-agent.git
-
-# یا با pip
-pip install git+https://github.com/Noperimme4/remote-agent.git
-```
-
----
-
-### گزینه ۲: نصب کامل (مرحله به مرحله)
-
-#### ۱. پیش‌نیازها
-- **Python 3.10+** (روی کلاینت و سرور)
-- **Git** برای کلون ریپو
-
-#### ۲. کلون ریپو
-```bash
-git clone https://github.com/Noperimme4/remote-agent.git
-cd remote-agent
-```
-
-#### ۳. نصب سرور (Linux)
-
-**روش آسان (اسکریپت خودکار):**
-```bash
-sudo ./scripts/install.sh
-```
-
-**خروجی نمونه:**
-```
 [✓] Python 3.11 ready
 [✓] User remote-agent created
 [✓] Code downloaded
@@ -97,28 +73,31 @@ sudo ./scripts/install.sh
 [✓] Systemd service installed
 
 ═══════════════════════════════════════════
-  TOKEN: a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef
+  🔑 YOUR TOKEN (SAVE THIS!)
+  a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef
 ═══════════════════════════════════════════
-  SAVE THIS TOKEN! You need it for client.
 
 Next steps:
   1. Start service:  systemctl start remote-agent
   2. Check status:   systemctl status remote-agent
   3. View logs:      journalctl -u remote-agent -f
 
-Client connection:
+Client usage:
   export AGENT_TOKEN="a1b2c3d4e5f6..."
   python -m client.cli --host YOUR_SERVER_IP -i
 ```
 
-**شروع سرویس:**
 ```bash
+# سرویس را شروع کنید
 sudo systemctl start remote-agent
 sudo systemctl enable remote-agent
-sudo systemctl status remote-agent
 ```
 
-#### ۴. نصب کلاینت (سیستم شما)
+---
+
+### کلاینت (همه پلتفرم‌ها)
+
+#### 🐧 Linux / macOS
 
 ```bash
 # روش ۱: pipx (توصیه شده - ایزوله)
@@ -126,19 +105,243 @@ pipx install git+https://github.com/Noperimme4/remote-agent.git
 
 # روش ۲: pip (سراسری)
 pip install git+https://github.com/Noperimme4/remote-agent.git
+```
 
-# روش ۳: کلون دستی
-git clone https://github.com/Noperimme4/remote-agent.git
-cd remote-agent
-pip install -e .[client]
+#### 🪟 Windows (PowerShell)
+
+```powershell
+# روش ۱: pipx
+pipx install git+https://github.com/Noperimme4/remote-agent.git
+
+# روش ۲: pip
+pip install git+https://github.com/Noperimme4/remote-agent.git
+```
+
+#### ✅ تست سریع کلاینت
+
+```bash
+# توکن را تنظیم کنید (از خروجی نصب سرور کپی کنید)
+export AGENT_TOKEN="your-token-here"
+
+# اتصال تستی
+agent --host YOUR_SERVER_IP -c "echo 'Connected successfully!'"
 ```
 
 ---
 
-### نصب با Docker
+## 📖 نصب کامل (مرحله به مرحله برای مبتدیان)
 
-```yaml
-# docker-compose.yml
+> **برای کسانی که می‌خواهند هر مرحله را درک کنند** — توضیح کامل، عکس‌های خروجی، و چک‌لیست.
+
+---
+
+### پیش‌نیازها
+
+| مورد | توضیح | چک |
+|------|--------|-----|
+| **Python 3.10+** | روی هر دو ماشین (سرور و کلاینت) | ☐ |
+| **Git** | برای کلون ریپو | ☐ |
+| **دسترسی sudo/root** | فقط روی سرور برای نصب سرویس | ☐ |
+| **اینترنت** | برای دانلود کد و وابستگی‌ها | ☐ |
+
+**بررسی پیش‌نیازها:**
+
+```bash
+# روی هر دو ماشین
+python3 --version   # باید 3.10 یا بالاتر باشد
+git --version       # باید نصب باشد
+```
+
+---
+
+### مرحله ۱: کلون ریپو
+
+روی **هر دو ماشین** (سرور و کلاینت) اجرا کنید:
+
+```bash
+git clone https://github.com/Noperimme4/remote-agent.git
+cd remote-agent
+```
+
+**خروجی مورد انتظار:**
+```bash
+Cloning into 'remote-agent'...
+remote: Enumerating objects: 150, done.
+remote: Counting objects: 100% (150/150), done.
+Receiving objects: 100% (150/150), 200.00 KiB, done.
+Resolving deltas: 100% (50/50), done.
+```
+
+---
+
+### مرحله ۲: نصب سرور روی لینوکس
+
+**فقط روی سرور (VPS، سرور خانگی، CI/CD runner) اجرا کنید:**
+
+```bash
+# وارد پوشه شوید
+cd remote-agent
+
+# اسکریپت نصب را اجرا کنید (نیاز به sudo دارد)
+sudo ./scripts/install.sh
+```
+
+**چی اتفاق می‌افتد؟** (اسکریپت به صورت خودکار انجام می‌دهد):
+1. ✅ چک می‌کند Python 3.10+ هست یا نه (نیاز باشد نصب می‌کند)
+2. ✅ یوزر `remote-agent` می‌سازد (امنیت: غیر روت)
+3. ✅ کد را دانلود می‌کند به `/opt/remote-agent`
+4. ✅ محیط مجازی Python می‌سازد و وابستگی‌ها نصب می‌کند
+5. ✅ فایل کانفیگ می‌سازد در `/etc/remote-agent/server.env`
+6. ✅ سرویس systemd می‌سازد: `remote-agent.service`
+7. ✅ **توکن ۶۴ کاراکتر هگز تولید می‌کند و نشان می‌دهد**
+
+---
+
+### مرحله ۳: شروع سرویس و گرفتن توکن
+
+پس از اجرای اسکریپت، **توکن را کپی کنید** (فقط یک بار نمایش داده می‌شود!):
+
+```bash
+# سرویس را شروع کنید
+sudo systemctl start remote-agent
+
+# فعال کنید تا بعد از ریبوت خودکار بالا بیاید
+sudo systemctl enable remote-agent
+
+# وضعیت را چک کنید
+sudo systemctl status remote-agent
+```
+
+**خروجی موفق `systemctl status`:**
+```
+● remote-agent.service - Remote Agent Server
+     Loaded: loaded (/etc/systemd/system/remote-agent.service; enabled)
+     Active: active (running) since Mon 2026-07-27 10:00:00 UTC; 5s ago
+   Main PID: 12345 (python)
+      Tasks: 1 (limit: 1000)
+     Memory: 45.0M
+     CGroup: /system.slice/remote-agent.service
+             └─12345 /opt/remote-agent/venv/bin/python -m server.agent
+```
+
+**لاگ زنده برای عیب‌یابی:**
+```bash
+journalctl -u remote-agent -f
+```
+
+---
+
+### مرحله ۴: نصب کلاینت روی سیستم خودتان
+
+روی **لپتاپ/دسکتاپ خودتان** (نه سرور):
+
+```bash
+# در پوشه کلون شده
+cd remote-agent
+
+# روش ۱: pipx (توصیه شده - جدا از سیستم)
+pipx install git+https://github.com/Noperimme4/remote-agent.git
+
+# روش ۲: pip (نصب سراسری)
+pip install git+https://github.com/Noperimme4/remote-agent.git
+
+# روش ۳: توسعه (editable)
+pip install -e .[client]
+```
+
+**تست نصب:**
+```bash
+agent --help
+```
+
+**خروجی:**
+```
+Usage: agent [OPTIONS]
+
+Options:
+  --host HOST         Server hostname/IP (default: localhost)
+  --port PORT         Server port (default: 8765)
+  --token TOKEN       Auth token (or set AGENT_TOKEN env)
+  ...
+```
+
+---
+
+### مرحله ۵: اتصال و تست
+
+**۱. متغیر محیطی توکن را تنظیم کنید:**
+
+```bash
+# Linux/macOS
+export AGENT_TOKEN="a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef"
+
+# Windows PowerShell
+$env:AGENT_TOKEN = "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef"
+
+# Windows CMD
+set AGENT_TOKEN=a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef
+```
+
+**۲. اتصال تستی (دستور تکی):**
+
+```bash
+agent --host YOUR_SERVER_IP -c "echo 'Hello from remote!'"
+```
+
+**۳. حالت تعاملی (منوی کامل):**
+
+```bash
+agent --host YOUR_SERVER_IP -i
+# یا فقط
+agent --host YOUR_SERVER_IP
+```
+
+**خروجی مورد انتظار:**
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║                    🌐 Remote Agent Client v2.0                  ║
+║         Secure Remote Control + Hermes AI Integration           ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+🔗 Server: remote-agent-server
+📍 Session: a1b2c3d4...
+📂 Dir: /data/workspace
+
+Key  Option              Description
+1    🐚 PTY Shell        Full terminal (vim, htop, ssh, sudo)
+2    🤖 Hermes AI Chat   Chat with Hermes AI on remote
+3    📁 File Browser     Browse, upload, download files
+4    ⚡ Quick Command    Run a single command
+5    🐳 Docker Manager   Containers, images, logs
+6    ⚙️  Services         systemctl start/stop/restart
+7    📊 System Monitor   CPU, RAM, Disk, Processes
+8    📝 View Logs        journalctl, dmesg, auth logs
+9    🔧 Settings         Change dir, timeout, TLS
+0    🚪 Exit             Disconnect and quit
+
+Select option [1]: 
+```
+
+**✅ تبریک! همه چیز کار می‌کند.**
+
+---
+
+## 🐳 نصب با Docker
+
+### پیش‌نیاز: Docker و Docker Compose
+
+```bash
+# چک کنید
+docker --version
+docker compose version
+```
+
+### ۱. فایل docker-compose.yml بسازید
+
+```bash
+cd remote-agent
+
+cat > docker-compose.yml << 'EOF'
 version: '3.8'
 services:
   remote-agent:
@@ -165,26 +368,40 @@ services:
 networks:
   agent-net:
     driver: bridge
+EOF
 ```
 
+### ۲. توکن تولید و استقرار کنید
+
 ```bash
-# تولید توکن و استقرار
+# توکن تصادفی تولید کنید
 echo "AGENT_TOKEN=$(openssl rand -hex 32)" > .env
+
+# کانتینر را بالا بیاورید
 docker compose up -d
+
+# لاگ‌ها را ببینید
 docker compose logs -f
+```
+
+### ۳. تست اتصال
+
+```bash
+export AGENT_TOKEN=$(cat .env | cut -d= -f2)
+agent --host YOUR_SERVER_IP -c "echo 'Docker server working!'"
 ```
 
 ---
 
-### نصب روی Windows
+## 🪟 نصب روی Windows
 
-**سرور (PowerShell به عنوان Administrator):**
+### سرور (PowerShell به عنوان Administrator)
+
 ```powershell
+# یک خط
 irm https://raw.githubusercontent.com/Noperimme4/remote-agent/main/scripts/install_windows.ps1 | iex
-```
 
-**یا دستی:**
-```powershell
+# یا دستی
 git clone https://github.com/Noperimme4/remote-agent.git
 cd remote-agent
 .\scripts\install_windows.ps1
@@ -193,57 +410,79 @@ cd remote-agent
 **خروجی:** توکن در کنسول نمایش داده می‌شود. سرویس `RemoteAgent` نصب می‌شود.
 
 ```powershell
+# مدیریت سرویس
 Start-Service RemoteAgent
 Get-Service RemoteAgent
 Get-Content "C:\ProgramData\RemoteAgent\logs\service.log" -Wait
 ```
 
-**کلاینت روی Windows:**
+### کلاینت روی Windows
+
 ```powershell
+# نصب
+pipx install git+https://github.com/Noperimme4/remote-agent.git
+
+# یا
+pip install git+https://github.com/Noperimme4/remote-agent.git
+
+# اتصال
 $env:AGENT_TOKEN = "YOUR_TOKEN"
-python -m client.cli --host SERVER_IP -i
+agent --host SERVER_IP -i
 ```
 
 ---
 
 ## 🔑 اتصال و استفاده
 
-### ۱. تنظیم متغیر محیطی توکن
+### ۱. تنظیم توکن (هر بار یا در `.bashrc`/پروفایل PowerShell)
 
 ```bash
-# Linux/macOS
-export AGENT_TOKEN="your-token-from-server"
+# Linux/macOS - موقت
+export AGENT_TOKEN="your-token"
 
-# PowerShell (Windows)
-$env:AGENT_TOKEN = "your-token-from-server"
-
-# CMD (Windows)
-set AGENT_TOKEN=your-token-from-server
+# Linux/macOS - دائمی (به ~/.bashrc اضافه کنید)
+echo 'export AGENT_TOKEN="your-token"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-### ۲. حالت تعاملی (Interactive Menu) - پیش‌فرض
+```powershell
+# Windows PowerShell - موقت
+$env:AGENT_TOKEN = "your-token"
 
-```bash
-agent
-# یا
-python -m client.cli --host YOUR_SERVER_IP -i
+# Windows PowerShell - دائمی
+[Environment]::SetEnvironmentVariable("AGENT_TOKEN", "your-token", "User")
 ```
 
-### ۳. اجرای دستور تکی
+### ۲. حالت‌های استفاده
+
+| دستور | توضیح |
+|--------|--------|
+| `agent --host IP -i` | منوی تعاملی کامل (پیش‌فرض) |
+| `agent --host IP -c "cmd"` | اجرای دستور تکی |
+| `agent --host IP --shell` | PTY Shell مستقیم |
+| `agent --host IP --hermes` | چت با Hermes AI |
+| `agent --host IP --files` | مرورگر فایل |
+| `agent --host IP --profiles` | مدیریت پروفایل‌ها |
+| `agent --profile NAME` | استفاده از پروفایل ذخیره شده |
+
+### ۳. مثال‌های عملی
 
 ```bash
+# لیست فایل‌ها
 agent -c "ls -la /data"
-agent -c "docker ps"
+
+# وضعیت داکر
+agent -c "docker ps -a"
+
+# استاتوس سرویس
 agent -c "systemctl status nginx"
-```
 
-### ۴. سایر حالت‌ها
+# لاگ‌ها
+agent -c "journalctl -u sshd -n 50 --no-pager"
 
-```bash
-agent --hermes          # چت با Hermes AI
-agent --files           # مرور فایل‌ها
-agent --shell           # PTY Shell مستقیم
-agent --profiles        # مدیریت پروفایل‌ها
+# مانیتورینگ
+agent -c "top -bn1 | head -10"
+agent -c "free -h && df -h /"
 ```
 
 ---
@@ -372,6 +611,13 @@ Current: myserver (192.168.1.100:8765) ⭐
 Actions: a)dd  c)onnect  s)elect  e)dit  d)elete  q)uit
 ```
 
+**عملیات:**
+- `a` — پروفایل جدید اضافه کنید
+- `c` — به پروفایل انتخاب شده وصل شوید
+- `s` — به عنوان پیش‌فرض انتخاب کنید
+- `e` — ویرایش کنید
+- `d` — حذف کنید
+
 ---
 
 ## ⚙️ تنظیمات سرور
@@ -410,7 +656,7 @@ AGENT_WORKDIR=/data/workspace
 # AGENT_TLS_KEY=/etc/remote-agent/key.pem
 ```
 
-### متغیرهای محیطی مهم
+### متغیرهای مهم
 
 | متغیر | پیش‌فرض | توضیح |
 |----------|---------|----------|
@@ -420,6 +666,12 @@ AGENT_WORKDIR=/data/workspace
 | `AGENT_ALLOW_SHELL` | `false` | اجازه `bash -c` |
 | `AGENT_MAX_TIMEOUT` | `300` | ماکزیمم تایم‌اوت (ثانیه) |
 | `AGENT_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+### اعمال تغییرات
+
+```bash
+sudo systemctl restart remote-agent
+```
 
 ---
 
@@ -468,96 +720,6 @@ sudo systemctl restart remote-agent
 
 ---
 
-## 🐳 Docker
-
-### Docker Compose (توصیه شده)
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  remote-agent:
-    build: .
-    container_name: remote-agent-server
-    ports:
-      - "8765:8765"
-    environment:
-      - AGENT_TOKEN=${AGENT_TOKEN}
-      - AGENT_HOST=0.0.0.0
-      - AGENT_PORT=8765
-      - AGENT_LOG_LEVEL=INFO
-      - AGENT_WORKDIR=/data/workspace
-      - AGENT_ALLOW_SHELL=false
-      - AGENT_ALLOW_FILES=true
-    volumes:
-      - ./data/workspace:/data/workspace
-      - ./config:/etc/remote-agent
-      - ./logs:/var/log/remote-agent
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-networks:
-  agent-net:
-    driver: bridge
-```
-
-```bash
-echo "AGENT_TOKEN=$(openssl rand -hex 32)" > .env
-docker compose up -d
-docker compose logs -f
-```
-
-### Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml .
-COPY server/ server/
-COPY shared/ shared/
-COPY client/ client/
-RUN pip install --no-cache-dir -e .[server]
-RUN useradd -r -u 1000 -m agent
-USER agent
-EXPOSE 8765
-CMD ["python", "-m", "server.agent"]
-```
-
----
-
-## 🪟 Windows
-
-### سرور (PowerShell به عنوان Administrator)
-
-```powershell
-# یک خط
-irm https://raw.githubusercontent.com/Noperimme4/remote-agent/main/scripts/install_windows.ps1 | iex
-
-# یا دستی
-git clone https://github.com/Noperimme4/remote-agent.git
-cd remote-agent
-.\scripts\install_windows.ps1
-```
-
-**خروجی:** توکن در کنسول نمایش داده می‌شود. سرویس `RemoteAgent` نصب می‌شود.
-
-```powershell
-Start-Service RemoteAgent
-Get-Service RemoteAgent
-Get-Content "C:\ProgramData\RemoteAgent\logs\service.log" -Wait
-```
-
-### کلاینت روی Windows
-
-```powershell
-$env:AGENT_TOKEN = "YOUR_TOKEN"
-python -m client.cli --host SERVER_IP -i
-```
-
----
-
 ## 🐛 عیب‌یابی سریع
 
 | مشکل | راه‌حل |
@@ -594,7 +756,7 @@ remote-agent/
 │   ├── __main__.py          # Entry point (agent command)
 │   ├── cli.py               # Core client logic
 │   ├── menu.py              # Interactive menu (10 options)
-│   ├── hermes.py            # Hermes AI chat
+│   ├── hermes.py            # Hermes AI Panel (full featured)
 │   ├── file_browser.py      # File browser (up/download/view)
 │   ├── pty_shell.py         # PTY terminal emulation
 │   ├── profile_manager.py   # Multi-server profiles
@@ -611,7 +773,7 @@ remote-agent/
 │   ├── install_windows.ps1  # Windows NSSM service installer
 │   └── install_linux.sh     # Legacy systemd installer
 ├── docs/
-│   ├── INSTALL_FA.md        # راهنمای فارسی
+│   ├── INSTALL_FA.md        # Persian guide
 │   └── INSTALL_EN.md        # English guide
 ├── tests/
 │   └── test_protocol.py     # 9 tests passing
