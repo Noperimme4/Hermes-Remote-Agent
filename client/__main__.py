@@ -86,6 +86,7 @@ async def main():
     parser.add_argument("-s", "--shell", action="store_true", help="PTY shell")
     parser.add_argument("--hermes", action="store_true", help="Hermes AI chat")
     parser.add_argument("--files", action="store_true", help="File browser")
+    parser.add_argument("--remote-files", action="store_true", help="Remote file browser (access local files from server)")
     parser.add_argument("--profiles", action="store_true", help="Manage profiles")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-h", "--help", action="store_true")
@@ -199,6 +200,12 @@ async def main():
             browser = FileBrowser(client, cwd)
             await browser.run()
         
+        elif args.remote_files:
+            # Remote File Browser (access local files from server perspective)
+            from client.remote_files import RemoteFileBrowser
+            browser = RemoteFileBrowser(client)
+            await browser.run()
+
         else:
             # Interactive Menu (default)
             menu = InteractiveMenu(client, profile_manager)

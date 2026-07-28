@@ -21,6 +21,7 @@ from client.cli import RemoteAgentClient, CommandResult
 from client.file_browser import FileBrowser
 from client.hermes import run_hermes_panel
 from client.profile_manager import ProfileManager
+from client.remote_files import RemoteFileBrowser
 
 
 @dataclass
@@ -43,13 +44,14 @@ class InteractiveMenu:
         self.items: List[MenuItem] = [
             MenuItem("1", "🐚 PTY Shell", self.shell_action, "Full terminal (vim, htop, ssh, sudo)"),
             MenuItem("2", "🤖 Hermes AI Chat", self.hermes_action, "Chat with Hermes AI on remote"),
-            MenuItem("3", "📁 File Browser", self.files_action, "Browse, upload, download files"),
-            MenuItem("4", "⚡ Quick Command", self.quick_cmd_action, "Run a single command"),
-            MenuItem("5", "🐳 Docker Manager", self.docker_action, "Containers, images, logs"),
-            MenuItem("6", "⚙️  Services (systemd)", self.services_action, "Start/stop/restart services"),
-            MenuItem("7", "📊 System Monitor", self.monitor_action, "CPU, RAM, Disk, Processes"),
-            MenuItem("8", "📝 View Logs", self.logs_action, "journalctl, dmesg, auth logs"),
-            MenuItem("9", "🔧 Settings", self.settings_action, "Change dir, timeout, TLS"),
+            MenuItem("3", "📁 Remote Files", self.remote_files_action, "Browse YOUR local files from server"),
+            MenuItem("4", "📂 File Browser", self.files_action, "Browse, upload, download server files"),
+            MenuItem("5", "⚡ Quick Command", self.quick_cmd_action, "Run a single command"),
+            MenuItem("6", "🐳 Docker Manager", self.docker_action, "Containers, images, logs"),
+            MenuItem("7", "⚙️  Services (systemd)", self.services_action, "Start/stop/restart services"),
+            MenuItem("8", "📊 System Monitor", self.monitor_action, "CPU, RAM, Disk, Processes"),
+            MenuItem("9", "📝 View Logs", self.logs_action, "journalctl, dmesg, auth logs"),
+            MenuItem("*", "🔧 Settings", self.settings_action, "Change dir, timeout, TLS"),
             MenuItem("0", "🚪 Exit", self.exit_action, "Disconnect and quit"),
         ]
     
@@ -109,9 +111,15 @@ class InteractiveMenu:
         await self.client.interactive_shell(cwd=self.current_dir)
     
     async def hermes_action(self):
-        """Start Hermes AI panel."""
+        """Hermes AI Panel."""
         await run_hermes_panel(self.client)
-    
+
+    async def remote_files_action(self):
+        """Remote file browser - access local files from server."""
+        from client.remote_files import RemoteFileBrowser
+        browser = RemoteFileBrowser(self.client)
+        await browser.run()
+
     async def files_action(self):
         """File browser."""
         browser = FileBrowser(self.client, self.current_dir)

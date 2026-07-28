@@ -392,3 +392,171 @@ class RemoteAgentClient:
         """Close PTY shell."""
         msg = ShellExit(shell_id=shell_id)
         await self._send_message(msg)
+
+    # ─── Remote File Access (Virtual FS) ─────────────────────────────
+
+    async def remote_open(self, path: str, mode: str = "rb") -> RemoteFileOpenResponse:
+        """Open a remote file on client's machine."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileOpenRequest(path=path, mode=mode)
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=10)
+        
+        if response is None:
+            raise TimeoutError("Remote file open timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        if not isinstance(response, RemoteFileOpenResponse):
+            raise Exception(f"Unexpected response type: {type(response)}")
+        
+        return response
+
+    async def remote_read(self, handle: str, offset: int, length: int) -> RemoteFileChunk:
+        """Read chunk from remote file."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileReadRequest(handle=handle, offset=offset, length=length)
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=30)
+        
+        if response is None:
+            raise TimeoutError("Remote file read timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        if not isinstance(response, RemoteFileChunk):
+            raise Exception(f"Unexpected response type: {type(response)}")
+        
+        return response
+
+    async def remote_write(self, handle: str, offset: int, data: bytes) -> bool:
+        """Write chunk to remote file."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileWriteRequest(
+            handle=handle,
+            offset=offset,
+            data=base64.b64encode(data).decode()
+        )
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=30)
+        
+        if response is None:
+            raise TimeoutError("Remote file write timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        return True
+
+    async def remote_seek(self, handle: str, offset: int, whence: int = 0) -> int:
+        """Seek in remote file."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileSeekRequest(handle=handle, offset=offset, whence=whence)
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=10)
+        
+        if response is None:
+            raise TimeoutError("Remote file seek timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        # Return new position from chunk offset
+        if isinstance(response, RemoteFileChunk):
+            return response.offset
+        return offset
+
+    async def remote_close(self, handle: str) -> bool:
+        """Close remote file handle."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileCloseRequest(handle=handle)
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=10)
+        
+        if response is None:
+            raise TimeoutError("Remote file close timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        return True
+
+    async def remote_stat(self, path: str) -> RemoteFileStatResponse:
+        """Get remote file metadata without opening."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileStatRequest(path=path)
+        await self._send_message(req)
+        
+        response = await self._wait_for_response(req.request_id, timeout=10)
+        
+        if response is None:
+            raise TimeoutError("Remote file stat timed out")
+        
+        if isinstance(response, RemoteFileError):
+            raise Exception(f"{response.code}: {response.message}")
+        
+        if not isinstance(response, RemoteFileStatResponse):
+            raise Exception(f"Unexpected response type: {type(response)}")
+        
+        return response
+
+    async def remote_list(self, path: str = ".", recursive: bool = False) -> RemoteFileListResponse:
+        """List remote directory."""
+        if not self.running:
+            raise RuntimeError("Not connected")
+        
+        req = RemoteFileListRequest(path=path, recursive=recursive)
+        await self._send_message(req)
+        
+        entries = []
+        while True:
+            response = await self._wait_for_response(req.request_id, timeout=10)
+            
+            if response is None:
+                break
+            
+            if isinstance(response, RemoteFileError):
+                raise Exception(f"{response.code}: {response.message}")
+            
+            if not isinstance(response, RemoteFileListResponse):
+                raise Exception(f"Unexpected response type: {type(response)}")
+            
+            if response.entries:
+                entries.extend(response.entries)
+            
+            # End marker (empty entries)
+            if not response.entries:
+                break
+        
+        return RemoteFileListResponse(
+            request_id=req.request_id,
+            success=True,
+            entries=entries
+        )
+
+    # High-level async file-like interface
+    async def remote_open_async(self, path: str, mode: str = "rb") -> "RemoteFileAsync":
+        """Open remote file as async file-like object."""
+        from client.remote_files import RemoteFileAsync
+        f = RemoteFileAsync(self, path, mode)
+        await f.open()
+        return f

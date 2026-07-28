@@ -77,10 +77,33 @@ class ServerConfig:
     allow_file_ops: bool = True
     tls_cert: Optional[str] = None
     tls_key: Optional[str] = None
+    # Remote file access mount points: "remote_path:local_path,remote_path:local_path"
+    remote_mounts: Dict[str, str] = field(default_factory=lambda: {
+        "/": "/",
+        "/home": "/home",
+        "/data": "/data",
+        "/tmp": "/tmp",
+    })
 
     @classmethod
     def from_env(cls) -> 'ServerConfig':
         """Load config from environment variables."""
+        # Parse remote mounts from AGENT_REMOTE_MOUNTS
+        remote_mounts_str = os.getenv("AGENT_REMOTE_MOUNTS", "")
+        remote_mounts = {}
+        if remote_mounts_str:
+            for pair in remote_mounts_str.split(","):
+                if ":" in pair:
+                    remote, local = pair.split(":", 1)
+                    remote_mounts[remote] = local
+        else:
+            remote_mounts = {
+                "/": "/",
+                "/home": "/home",
+                "/data": "/data",
+                "/tmp": "/tmp",
+            }
+        
         return cls(
             host=os.getenv("AGENT_HOST", "0.0.0.0"),
             port=int(os.getenv("AGENT_PORT", "8765")),
@@ -98,6 +121,7 @@ class ServerConfig:
             allow_file_ops=os.getenv("AGENT_ALLOW_FILES", "true").lower() == "true",
             tls_cert=os.getenv("AGENT_TLS_CERT"),
             tls_key=os.getenv("AGENT_TLS_KEY"),
+            remote_mounts=remote_mounts,
         )
 
     def __post_init__(self):
@@ -526,13 +550,7 @@ class RemoteAgentServer:
             self.sessions[session_id] = session
             
             # Register client with Remote File Server
-            client_mounts = {
-                "/": "/",
-                "/home": "/home",
-                "/data": "/data",
-                "/tmp": "/tmp",
-            }
-            self.remote_file_server.register_client(session_id, client_mounts)
+            self.remote_file_server.register_client(session_id, self.config.remote_mounts)
             
             self.logger.info(f"Client authenticated: {message.client_name} (session: {session_id})")
             

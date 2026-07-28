@@ -83,6 +83,7 @@ AGENT_LOG_FILE=$LOG_DIR/server.log
 AGENT_WORKDIR=$WORK_DIR
 AGENT_ALLOW_SHELL=false
 AGENT_ALLOW_FILES=true
+AGENT_REMOTE_MOUNTS=/:/,/home:/home,/data:/data,/tmp:/tmp
 EOF
 chmod 600 "$CONFIG_DIR/server.env"
 chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR/server.env"
